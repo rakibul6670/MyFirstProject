@@ -19,14 +19,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
+import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.rakibul.myfirstapp.service.GalleryMonitorService
 import com.rakibul.myfirstapp.service.LocationService
 import com.rakibul.myfirstapp.ui.theme.MyFirstAppTheme
 
@@ -54,7 +55,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyFirstAppTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    LocationDashboardScreen(
+                    MainDashboardScreen(
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -64,10 +65,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun LocationDashboardScreen(modifier: Modifier = Modifier) {
+fun MainDashboardScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
 
-    var isServiceRunning by remember { mutableStateOf(false) }
+    // State for Location Service
+    var isLocationServiceRunning by remember { mutableStateOf(false) }
     var fineLocationGranted by remember {
         mutableStateOf(hasPermission(context, Manifest.permission.ACCESS_FINE_LOCATION))
     }
@@ -78,6 +80,28 @@ fun LocationDashboardScreen(modifier: Modifier = Modifier) {
             } else true
         )
     }
+
+    // State for Gallery Monitor Service
+    var isGalleryServiceRunning by remember { mutableStateOf(false) }
+    var mediaImagesGranted by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                hasPermission(context, Manifest.permission.READ_MEDIA_IMAGES)
+            } else {
+                hasPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        )
+    }
+    var mediaVideoGranted by remember {
+        mutableStateOf(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                hasPermission(context, Manifest.permission.READ_MEDIA_VIDEO)
+            } else {
+                hasPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+        )
+    }
+
     var notificationPermissionGranted by remember {
         mutableStateOf(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -87,12 +111,26 @@ fun LocationDashboardScreen(modifier: Modifier = Modifier) {
     }
 
     // Permission launcher for Location & Notifications
-    val permissionsLauncher = rememberLauncherForActivityResult(
+    val locationPermissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: fineLocationGranted
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionGranted = permissions[Manifest.permission.POST_NOTIFICATIONS] ?: notificationPermissionGranted
+        }
+    }
+
+    // Permission launcher for Media (Android 13+ & Legacy)
+    val mediaPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            mediaImagesGranted = permissions[Manifest.permission.READ_MEDIA_IMAGES] ?: mediaImagesGranted
+            mediaVideoGranted = permissions[Manifest.permission.READ_MEDIA_VIDEO] ?: mediaVideoGranted
+        } else {
+            val storageGranted = permissions[Manifest.permission.READ_EXTERNAL_STORAGE] ?: false
+            mediaImagesGranted = storageGranted
+            mediaVideoGranted = storageGranted
         }
     }
 
@@ -111,71 +149,121 @@ fun LocationDashboardScreen(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "Background Location Tracker",
-            style = MaterialTheme.typography.headlineMedium.copy(
-                fontWeight = FontWeight.Bold
-            )
+            text = "Background Services Monitor",
+            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
         )
 
         Text(
-            text = "Android 12+ Foreground Service Safeguards & Logcat Monitor",
+            text = "Real-time Location & MediaStore Gallery Monitor (Logcat Viewer)",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // Status Card
+        // ================= SECTION 1: GALLERY & MEDIA MONITOR =================
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isServiceRunning) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
-            )
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = if (isServiceRunning) "🟢 TRACKING SERVICE ACTIVE" else "🔴 TRACKING SERVICE STOPPED",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (isServiceRunning) Color(0xFF2E7D32) else Color(0xFFC62828)
+                    text = "🖼️ Gallery & Media Monitor",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+
                 Text(
-                    text = if (isServiceRunning)
-                        "Open Logcat with tag 'LocationService' to see live latitude, longitude, & accuracy updates."
+                    text = if (isGalleryServiceRunning)
+                        "🟢 GALLERY MONITOR ACTIVE: Filter Logcat by 'GalleryMonitorService' to see distinct ============== IMAGE and ============== VIDEO logs."
                     else
-                        "Press 'Start Service' below to launch the Foreground Service with persistent notification.",
-                    style = MaterialTheme.typography.bodySmall
+                        "🔴 GALLERY MONITOR STOPPED",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isGalleryServiceRunning) Color(0xFF2E7D32) else Color(0xFFC62828)
                 )
+
+                PermissionStatusItem(label = "Read Media Images", isGranted = mediaImagesGranted)
+                PermissionStatusItem(label = "Read Media Videos", isGranted = mediaVideoGranted)
+
+                OutlinedButton(
+                    onClick = {
+                        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            mutableListOf(
+                                Manifest.permission.READ_MEDIA_IMAGES,
+                                Manifest.permission.READ_MEDIA_VIDEO
+                            ).apply {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                    add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                                }
+                            }.toTypedArray()
+                        } else {
+                            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                        }
+                        mediaPermissionsLauncher.launch(permissions)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Grant Gallery/Media Permissions")
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            val serviceIntent = Intent(context, GalleryMonitorService::class.java).apply {
+                                action = GalleryMonitorService.ACTION_START
+                            }
+                            ContextCompat.startForegroundService(context, serviceIntent)
+                            isGalleryServiceRunning = true
+                        },
+                        enabled = mediaImagesGranted && !isGalleryServiceRunning,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                    ) {
+                        Text("Start Gallery Monitor")
+                    }
+
+                    Button(
+                        onClick = {
+                            val serviceIntent = Intent(context, GalleryMonitorService::class.java).apply {
+                                action = GalleryMonitorService.ACTION_STOP
+                            }
+                            context.startService(serviceIntent)
+                            isGalleryServiceRunning = false
+                        },
+                        enabled = isGalleryServiceRunning,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                    ) {
+                        Text("Stop Gallery Monitor")
+                    }
+                }
             }
         }
 
-        // Permissions Card
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        // ================= SECTION 2: LOCATION TRACKER =================
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Permission Safeguards Status",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                    text = "📍 Background Location Tracker",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
 
-                PermissionStatusItem(
-                    label = "Fine / Coarse Location",
-                    isGranted = fineLocationGranted
+                Text(
+                    text = if (isLocationServiceRunning)
+                        "🟢 LOCATION TRACKER ACTIVE: Filter Logcat by 'LocationService'"
+                    else
+                        "🔴 LOCATION TRACKER STOPPED",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isLocationServiceRunning) Color(0xFF2E7D32) else Color(0xFFC62828)
                 )
 
-                PermissionStatusItem(
-                    label = "Post Notifications (Android 13+)",
-                    isGranted = notificationPermissionGranted
-                )
-
-                PermissionStatusItem(
-                    label = "Background Location ('Allow all the time')",
-                    isGranted = backgroundLocationGranted
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
+                PermissionStatusItem(label = "Fine / Coarse Location", isGranted = fineLocationGranted)
+                PermissionStatusItem(label = "Background Location ('Allow all the time')", isGranted = backgroundLocationGranted)
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -190,11 +278,11 @@ fun LocationDashboardScreen(modifier: Modifier = Modifier) {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 permissions.add(Manifest.permission.POST_NOTIFICATIONS)
                             }
-                            permissionsLauncher.launch(permissions.toTypedArray())
+                            locationPermissionsLauncher.launch(permissions.toTypedArray())
                         },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Grant Foreground", fontSize = 12.sp)
+                        Text("Grant Location", fontSize = 12.sp)
                     }
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -208,59 +296,41 @@ fun LocationDashboardScreen(modifier: Modifier = Modifier) {
                         }
                     }
                 }
-            }
-        }
 
-        // Service Control Buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                onClick = {
-                    val serviceIntent = Intent(context, LocationService::class.java).apply {
-                        action = LocationService.ACTION_START
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            val serviceIntent = Intent(context, LocationService::class.java).apply {
+                                action = LocationService.ACTION_START
+                            }
+                            ContextCompat.startForegroundService(context, serviceIntent)
+                            isLocationServiceRunning = true
+                        },
+                        enabled = fineLocationGranted && !isLocationServiceRunning,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                    ) {
+                        Text("Start Location Service")
                     }
-                    ContextCompat.startForegroundService(context, serviceIntent)
-                    isServiceRunning = true
-                },
-                enabled = fineLocationGranted && !isServiceRunning,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
-            ) {
-                Text("Start Service")
-            }
 
-            Button(
-                onClick = {
-                    val serviceIntent = Intent(context, LocationService::class.java).apply {
-                        action = LocationService.ACTION_STOP
+                    Button(
+                        onClick = {
+                            val serviceIntent = Intent(context, LocationService::class.java).apply {
+                                action = LocationService.ACTION_STOP
+                            }
+                            context.startService(serviceIntent)
+                            isLocationServiceRunning = false
+                        },
+                        enabled = isLocationServiceRunning,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                    ) {
+                        Text("Stop Location Service")
                     }
-                    context.startService(serviceIntent)
-                    isServiceRunning = false
-                },
-                enabled = isServiceRunning,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
-            ) {
-                Text("Stop Service")
-            }
-        }
-
-        // Information Box for Firebase Integration
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "🔥 Next Step: Firebase Sync",
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "All location payloads are currently structured and logged to Logcat inside LocationService.kt. Once verified, simply add google-services.json and call FirebaseFirestore.getInstance().collection(\"locations\").add(data).",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                }
             }
         }
     }
